@@ -30,6 +30,8 @@ import (
 )
 
 var (
+	testingPkgsProjectName = "gce-package-testing"
+
 	yumInstallAgent = `
 sed -i 's/repo_gpgcheck=1/repo_gpgcheck=0/g' /etc/yum.repos.d/google-cloud.repo
 sleep 10
@@ -83,35 +85,48 @@ Start-Sleep 10
 $uri = 'http://metadata.google.internal/computeMetadata/v1/instance/guest-attributes/osconfig_tests/install_done'
 Invoke-RestMethod -Method PUT -Uri $uri -Headers @{"Metadata-Flavor" = "Google"} -Body 1
 `
-
-	yumRepoSetup = `
-cat > /etc/yum.repos.d/google-osconfig-agent.repo <<EOM
-[google-osconfig-agent]
-name=Google OSConfig Agent Repository
-baseurl=https://packages.cloud.google.com/yum/repos/google-osconfig-agent-%s-%s
-enabled=1
-gpgcheck=%d
-gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
-           https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
-EOM`
-
-	zypperRepoSetup = `
-cat > /etc/zypp/repos.d/google-osconfig-agent.repo <<EOM
-[google-osconfig-agent]
-name=Google OSConfig Agent Repository
-baseurl=https://packages.cloud.google.com/yum/repos/google-osconfig-agent-%s-%s
-enabled=1
-gpgcheck=%d
-gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
-           https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
-EOM`
 )
 
+// getRegionFromZone extracts the region from a zone name.
+// Example: If zone is "us-central1-a", this would return "us-central1"
+func getRegionFromZone(zone string) string {
+	parts := strings.Split(zone, "-")
+	return strings.Join(parts[:len(parts)-1], "-")
+}
+
+// pickTestRegionForArtifactRegistry selects a random zone from the configured zones to pull osconfig-agent package from AR & selected-region
+func pickTestRegionForArtifactRegistry() string {
+	zones := config.Zones()
+	randomIndex := rand.Intn(len(zones))
+
+	currentIndex := 0
+	randomZone := ""
+	for zone := range zones {
+		if currentIndex == randomIndex {
+			randomZone = zone
+		}
+	}
+
+	return getRegionFromZone(randomZone)
+}
+
+// getRepoLineForApt returns the repo line that should be added to apt sources.list file
+func getRepoLineForApt(osName string) string {
+	repo := config.AgentRepo()
+	if repo == "testing" {
+		testRegion := pickTestRegionForArtifactRegistry()
+		return fmt.Sprintf("deb ar+https://%s-apt.pkg.dev/projects/%s google-osconfig-agent-%s-testing main",
+			testRegion, testingPkgsProjectName, osName)
+	}
+	return fmt.Sprintf("deb http://packages.cloud.google.com/apt google-osconfig-agent-%s-%s main", osName, repo)
+}
+
 // InstallOSConfigDeb installs the osconfig agent on deb based systems.
-func InstallOSConfigDeb() string {
+func InstallOSConfigDeb(image string) string {
 	if config.AgentRepo() == "" {
 		return CurlPost
 	}
+	osName := getDebOsName(image)
 	return fmt.Sprintf(`
 sleep 10
 systemctl stop google-osconfig-agent
@@ -120,11 +135,15 @@ systemctl stop google-osconfig-agent
 apt-get update
 apt-get install -y gnupg2
 
-echo 'deb http://packages.cloud.google.com/apt google-osconfig-agent-%s main' >> /etc/apt/sources.list
+# install apt-transport-artifact-registry
+apt-get install -y apt-transport-artifact-registry
+
+echo '%s' >> /etc/apt/sources.list
+
 curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
 apt-get update
 apt-get install -y google-osconfig-agent
-systemctl start google-osconfig-agent`+CurlPost, config.AgentRepo())
+systemctl start google-osconfig-agent`+CurlPost, getRepoLineForApt(osName))
 }
 
 // InstallOSConfigGooGet installs the osconfig agent on Windows systems.
@@ -132,26 +151,69 @@ func InstallOSConfigGooGet() string {
 	if config.AgentRepo() == "" {
 		return windowsPost
 	}
+	removeAgentCmd := `c:\programdata\googet\googet.exe -noconfirm remove google-osconfig-agent`
 	if config.AgentRepo() == "stable" {
-		return `
-c:\programdata\googet\googet.exe -noconfirm remove google-osconfig-agent
-c:\programdata\googet\googet.exe -noconfirm install google-osconfig-agent` + windowsPost
+		return fmt.Sprintf(`
+%s
+c:\programdata\googet\googet.exe -noconfirm install google-osconfig-agent`, removeAgentCmd) + windowsPost
+	} else if config.AgentRepo() == "testing" {
+		testRegion := pickTestRegionForArtifactRegistry()
+		agentRepo := config.AgentRepo()
+		return fmt.Sprintf(`
+%s
+c:\programdata\googet\googet.exe addrepo google-osconfig-agent-googet-testing https://%s-googet.pkg.dev/projects/%s/repos/google-osconfig-agent-googet-%s
+
+# set useoauth to true in repo new file
+$filePath = 'C:\ProgramData\GooGet\repos\google-osconfig-agent-googet-testing.repo'
+(Get-Content $filePath) -replace 'useoauth: false', 'useoauth: true' | Set-Content $filePath
+
+c:\programdata\googet\googet.exe -noconfirm install google-osconfig-agent`+windowsPost, removeAgentCmd, testRegion, testingPkgsProjectName, agentRepo)
 	}
 	return fmt.Sprintf(`
-c:\programdata\googet\googet.exe -noconfirm remove google-osconfig-agent
+%s
 c:\programdata\googet\googet.exe -noconfirm install -sources https://packages.cloud.google.com/yuck/repos/google-osconfig-agent-%s google-osconfig-agent
-`+windowsPost, config.AgentRepo())
+`+windowsPost, removeAgentCmd, config.AgentRepo())
 }
 
-// InstallOSConfigSUSE installs the osconfig agent on suse systems.
-func InstallOSConfigSUSE() string {
-	if config.AgentRepo() == "" {
-		return ""
+// getYumRepoBaseURL returns the repo baseUrl that should be added to repo file google-osconfig-agent.repo
+func getYumRepoBaseURL(osType string) string {
+	agentRepo := config.AgentRepo()
+	if agentRepo == "testing" {
+		testRegion := pickTestRegionForArtifactRegistry()
+		return fmt.Sprintf("https://%s-yum.pkg.dev/projects/%s/google-osconfig-agent-%s-testing", testRegion, testingPkgsProjectName, osType)
 	}
-	if config.AgentRepo() == "staging" || config.AgentRepo() == "stable" {
-		return fmt.Sprintf(zypperRepoSetup+zypperInstallAgent, "el8", config.AgentRepo(), 1)
+	return fmt.Sprintf("https://packages.cloud.google.com/yum/repos/google-osconfig-agent-%s-%s", osType, agentRepo)
+}
+
+func getYumRepoSetup(osType string) string {
+	gpgcheck := 0
+	if config.AgentRepo() == "staging" {
+		gpgcheck = 1
 	}
-	return fmt.Sprintf(zypperRepoSetup+zypperInstallAgent, "el8", config.AgentRepo(), 0)
+
+	// According to doc, pkg name differ according to ELv version
+	// doc: https://cloud.google.com/artifact-registry/docs/os-packages/rpm/configure#prepare-yum
+	format := "dnf"
+	if osType == "el7" {
+		format = "yum"
+	}
+
+	repoConfig := fmt.Sprintf(`
+# install yum-plugin-artifact-registry
+yum makecache
+yum install -y %s-plugin-artifact-registry
+
+cat > /etc/yum.repos.d/google-osconfig-agent.repo <<EOM
+[google-osconfig-agent]
+name=Google OSConfig Agent Repository
+baseurl=%s
+enabled=1
+gpgcheck=%d
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
+			https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOM`, format, getYumRepoBaseURL(osType), gpgcheck)
+
+	return repoConfig
 }
 
 // InstallOSConfigEL9 installs the osconfig agent on el9 based systems. (RHEL)
@@ -163,9 +225,9 @@ func InstallOSConfigEL9() string {
 		return yumInstallAgent
 	}
 	if config.AgentRepo() == "staging" {
-		return fmt.Sprintf(yumRepoSetup+yumInstallAgent, "el9", config.AgentRepo(), 1)
+		return getYumRepoSetup("el9") + yumInstallAgent
 	}
-	return fmt.Sprintf(yumRepoSetup+yumInstallAgent, "el9", config.AgentRepo(), 0)
+	return getYumRepoSetup("el9") + yumInstallAgent
 }
 
 // InstallOSConfigEL8 installs the osconfig agent on el8 based systems. (RHEL)
@@ -177,9 +239,9 @@ func InstallOSConfigEL8() string {
 		return yumInstallAgent
 	}
 	if config.AgentRepo() == "staging" {
-		return fmt.Sprintf(yumRepoSetup+yumInstallAgent, "el8", config.AgentRepo(), 1)
+		return getYumRepoSetup("el8") + yumInstallAgent
 	}
-	return fmt.Sprintf(yumRepoSetup+yumInstallAgent, "el8", config.AgentRepo(), 0)
+	return getYumRepoSetup("el8") + yumInstallAgent
 }
 
 // InstallOSConfigEL7 installs the osconfig agent on el7 based systems.
@@ -191,9 +253,9 @@ func InstallOSConfigEL7() string {
 		return yumInstallAgent
 	}
 	if config.AgentRepo() == "staging" {
-		return fmt.Sprintf(yumRepoSetup+yumInstallAgent, "el7", config.AgentRepo(), 1)
+		return getYumRepoSetup("el7") + yumInstallAgent
 	}
-	return fmt.Sprintf(yumRepoSetup+yumInstallAgent, "el7", config.AgentRepo(), 0)
+	return getYumRepoSetup("el7") + yumInstallAgent
 }
 
 // containsAnyOf checks if a string contains any substring from a given list.
@@ -221,30 +283,72 @@ func InstallOSConfigEL(image string) string {
 	return ""
 }
 
-// DowngradeAptImages is a single image that are used for testing downgrade case with apt-get
-var DowngradeAptImages = map[string]string{
+func getZypperRepoSetup(osType string) string {
+	gpgcheck := 0
+	if config.AgentRepo() == "staging" {
+		gpgcheck = 1
+	}
+
+	// TODO: Allow SUSE tests to pull packages from test project.
+	repoConfig := fmt.Sprintf(`
+cat > /etc/zypp/repos.d/google-osconfig-agent.repo <<EOM
+[google-osconfig-agent]
+name=Google OSConfig Agent Repository
+baseurl=%s
+enabled=1
+gpgcheck=%d
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
+			https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOM`, getYumRepoBaseURL(osType), gpgcheck)
+
+	return repoConfig
+}
+
+// InstallOSConfigSUSE installs the osconfig agent on suse systems.
+func InstallOSConfigSUSE() string {
+	if config.AgentRepo() == "" {
+		return ""
+	}
+	if config.AgentRepo() == "staging" || config.AgentRepo() == "stable" {
+		return getZypperRepoSetup("el8") + zypperInstallAgent
+	}
+	return getZypperRepoSetup("el8") + zypperInstallAgent
+}
+
+// getDebOsType returns the equivalent os_name for deb version (e.g. debian-11 --> bullseye)
+func getDebOsName(image string) string {
+	imageName := path.Base(image)
+	switch {
+	case image == "10" || containsAnyOf(imageName, []string{"debian-10", "buster"}):
+		return "buster"
+	case image == "11" || containsAnyOf(imageName, []string{"debian-11", "bullseye"}):
+		return "bullseye"
+	case image == "12" || containsAnyOf(imageName, []string{"debian-12", "bookworm"}):
+		return "bookworm"
+	}
+	return ""
+}
+
+// DowngradeBullseyeAptImages is a single image that are used for testing downgrade case with apt-get
+var DowngradeBullseyeAptImages = map[string]string{
 	"debian-cloud/debian-11": "projects/debian-cloud/global/images/debian-11-bullseye-v20231010",
 }
 
-// HeadAptImages is a map of names to image paths for public image families that use APT.
-var HeadAptImages = map[string]string{
+// HeadBusterAptImages empty for now as debian-10 wil reach EOL and some of its repos are not reachable anymore.
+var HeadBusterAptImages = map[string]string{
 	// Debian images.
-	"debian-cloud/debian-11": "projects/debian-cloud/global/images/family/debian-11",
-	"debian-cloud/debian-12": "projects/debian-cloud/global/images/family/debian-12",
-
-	// Ubuntu images.
-	"ubuntu-os-cloud/ubuntu-2314": "projects/ubuntu-os-cloud/global/images/ubuntu-2310-mantic-amd64-v20231011",
-
-	// Temporary added to test latest version of osconfig-agent in Ubuntu Canonical repos
-	"temporary-canonical-latest/ubuntu-2410": "projects/compute-image-osconfig-agent/global/images/testing-ubuntu-minimal-guest-2410-oracular-amd64-v20240503",
 }
 
-// OldAptImages is a map of names to image paths for old (deprecated) images that use APT.
-var OldAptImages = map[string]string{
+// HeadBullseyeAptImages is a map of names to image paths for public debian-11 images
+var HeadBullseyeAptImages = map[string]string{
 	// Debian images.
+	"debian-cloud/debian-11": "projects/debian-cloud/global/images/family/debian-11",
+}
 
-	// Ubuntu images.
-	"old/ubuntu-2004": "projects/ubuntu-os-cloud/global/images/ubuntu-2004-focal-v20230918",
+// HeadBookwormAptImages is a map of names to image paths for public debian-12 images
+var HeadBookwormAptImages = map[string]string{
+	// Debian images.
+	"debian-cloud/debian-12": "projects/debian-cloud/global/images/family/debian-12",
 }
 
 // HeadSUSEImages is a map of names to image paths for public SUSE images.
@@ -329,6 +433,21 @@ var HeadELImages = func() (newMap map[string]string) {
 		newMap[k] = v
 	}
 	for k, v := range HeadEL9Images {
+		newMap[k] = v
+	}
+	return
+}()
+
+// HeadAptImages is a map of names to image paths for public EL image families. (RHEL, CentOS, Rocky)
+var HeadAptImages = func() (newMap map[string]string) {
+	newMap = make(map[string]string)
+	for k, v := range HeadBusterAptImages {
+		newMap[k] = v
+	}
+	for k, v := range HeadBullseyeAptImages {
+		newMap[k] = v
+	}
+	for k, v := range HeadBookwormAptImages {
 		newMap[k] = v
 	}
 	return
