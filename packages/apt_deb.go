@@ -22,11 +22,9 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"sort"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/osconfig/clog"
-	"github.com/GoogleCloudPlatform/osconfig/osinfo"
 	"github.com/GoogleCloudPlatform/osconfig/util"
 )
 
@@ -36,8 +34,8 @@ var (
 	dpkgDeb   string
 	aptGet    string
 
-	dpkgInstallArgs       = []string{"--install"}
-	dpkgInfoFieldsMapping = map[string]string{
+	dpkgInstallArgs          = []string{"--install"}
+	dpkgPackageFieldsMapping = map[string]string{
 		"package":        "${Package}",
 		"architecture":   "${Architecture}",
 		"version":        "${Version}",
@@ -46,12 +44,11 @@ var (
 		"source_version": "${source:Version}",
 	}
 
-	dpkgPackageFormatJSON = formatDpkgFieldsMappingToFormatingString(dpkgInfoFieldsMapping)
-	dpkgQueryArgs         = []string{"-W", "-f", dpkgPackageFormatJSON}
-	dpkgRepairArgs        = []string{"--configure", "-a"}
-	aptGetInstallArgs     = []string{"install", "-y"}
-	aptGetRemoveArgs      = []string{"remove", "-y"}
-	aptGetUpdateArgs      = []string{"update"}
+	dpkgQueryArgs     = []string{"-W", "-f", formatFieldsMappingToFormattingString(dpkgPackageFieldsMapping)}
+	dpkgRepairArgs    = []string{"--configure", "-a"}
+	aptGetInstallArgs = []string{"install", "-y"}
+	aptGetRemoveArgs  = []string{"remove", "-y"}
+	aptGetUpdateArgs  = []string{"update"}
 
 	aptGetUpgradeCmd     = "upgrade"
 	aptGetFullUpgradeCmd = "full-upgrade"
@@ -100,24 +97,6 @@ func AptGetUpgradeType(upgradeType AptUpgradeType) AptGetUpgradeOption {
 	return func(args *aptGetUpgradeOpts) {
 		args.upgradeType = upgradeType
 	}
-}
-
-func formatDpkgFieldsMappingToFormatingString(fieldsMapping map[string]string) string {
-	fieldsDescriptors := make([]string, 0, len(fieldsMapping))
-
-	for name, selector := range fieldsMapping {
-		// format field name and its selector to one single entry separated by ":" and each of them wrapped in quotes
-		// name:source_name, selector:${source:Package -> ""source_name":"${source:Package}"".
-		fieldsDescriptors = append(fieldsDescriptors, fmt.Sprintf("\"%s\":\"%s\"", name, selector))
-	}
-
-	// sort descriptors to get predictable result.
-	sort.Strings(fieldsDescriptors)
-
-	// Returns string to format all information in json
-	// Example: {"package":"${Package}","architecture":"${Architecture}","version":"${Version}","status":"${db:Status-Status}"...}\n
-	// See dpkgInfoFieldsMapping for full set of fields.
-	return "{" + strings.Join(fieldsDescriptors, ",") + "}\n"
 }
 
 // AptGetUpgradeShowNew returns a AptGetUpgradeOption that indicates whether 'new' packages should be returned.
@@ -197,7 +176,7 @@ func parseDpkgDeb(data []byte) (*PkgInfo, error) {
 	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
 	info := &PkgInfo{}
 	for _, ln := range lines {
-		if info.Name != "" && info.Version != "" && info.Arch != "" {
+		if info.Name != "" && info.Version != "" && info.Arch.Architecture() != "" {
 			break
 		}
 		fields := bytes.Fields(ln)
@@ -217,11 +196,11 @@ func parseDpkgDeb(data []byte) (*PkgInfo, error) {
 			continue
 		}
 		if bytes.Contains(fields[0], []byte("Architecture:")) {
-			info.Arch = osinfo.Architecture(string(fields[1]))
+			info.Arch = NewArchitecture(string(fields[1]))
 			continue
 		}
 	}
-	if info.Name == "" || info.Version == "" || info.Arch == "" {
+	if info.Name == "" || info.Version == "" || info.Arch.Architecture() == "" {
 		return nil, fmt.Errorf("could not parse dpkg-deb output: %q", data)
 	}
 	return info, nil
@@ -315,7 +294,7 @@ func parseAptUpdates(ctx context.Context, data []byte, showNew bool) []*PkgInfo 
 		}
 		ver := bytes.Trim(pkg[1], "(")             // (246.0.0-0 => 246.0.0-0
 		arch := bytes.Trim(pkg[len(pkg)-1], "[])") // [all]) => all
-		pkgs = append(pkgs, &PkgInfo{Name: string(pkg[0]), Arch: osinfo.Architecture(string(arch)), Version: string(ver)})
+		pkgs = append(pkgs, &PkgInfo{Name: string(pkg[0]), Arch: NewArchitecture(string(arch)), Version: string(ver)})
 	}
 	return pkgs
 }
@@ -381,15 +360,6 @@ func InstalledDebPackages(ctx context.Context) ([]*PkgInfo, error) {
 	return parseInstalledDebPackages(ctx, out), nil
 }
 
-type dpkgInfo struct {
-	Package       string `json:"package"`
-	Architecture  string `json:"architecture"`
-	Version       string `json:"version"`
-	Status        string `json:"status"`
-	SourceName    string `json:"source_name"`
-	SourceVersion string `json:"source_version"`
-}
-
 func parseInstalledDebPackages(ctx context.Context, data []byte) []*PkgInfo {
 	/*
 		Each line contains an entry in a json format, keep in mind that whole output is not valid json.
@@ -403,29 +373,21 @@ func parseInstalledDebPackages(ctx context.Context, data []byte) []*PkgInfo {
 
 	var result []*PkgInfo
 	for _, entry := range entries {
-		var dpkg dpkgInfo
+		var dpkg packageMetadata
 		if err := json.Unmarshal(entry, &dpkg); err != nil {
 			clog.Debugf(ctx, "unable to parse dpkg package info, err %s, raw - %s", err, string(entry))
 			continue
 		}
 
-		pkg := pkgInfoFromDpkgInfo(dpkg)
+		pkg := pkgInfoFromPackageMetadata(dpkg)
+		if dpkg.Status != "installed" {
+			continue
+		}
+
 		result = append(result, pkg)
 	}
 
 	return result
-}
-
-func pkgInfoFromDpkgInfo(dpkg dpkgInfo) *PkgInfo {
-	return &PkgInfo{
-		Name:    dpkg.Package,
-		Arch:    osinfo.Architecture(dpkg.Architecture),
-		Version: dpkg.Version,
-		Source: Source{
-			Name:    dpkg.SourceName,
-			Version: dpkg.SourceVersion,
-		},
-	}
 }
 
 // DpkgInstall installs a deb package.

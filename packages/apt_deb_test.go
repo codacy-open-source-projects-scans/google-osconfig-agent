@@ -16,7 +16,6 @@ package packages
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"reflect"
 	"slices"
@@ -25,14 +24,6 @@ import (
 	utilmocks "github.com/GoogleCloudPlatform/osconfig/util/mocks"
 	"github.com/golang/mock/gomock"
 )
-
-type expectedCommand struct {
-	cmd    *exec.Cmd
-	envs   []string
-	stdout []byte
-	stderr []byte
-	err    error
-}
 
 func TestInstallAptPackages(t *testing.T) {
 	tests := []struct {
@@ -180,14 +171,14 @@ func TestAptUpdates(t *testing.T) {
 		name                  string
 		args                  []AptGetUpgradeOption
 		expectedCommandsChain []expectedCommand
-		expectedResult        []*PkgInfo
+		expectedResults       []*PkgInfo
 		expectedError         error
 	}{
 		{
 			name:                  "UnexpectedUpgradeType",
 			args:                  []AptGetUpgradeOption{AptGetUpgradeType(10)},
 			expectedCommandsChain: nil,
-			expectedResult:        nil,
+			expectedResults:       nil,
 			expectedError:         fmt.Errorf("unknown upgrade type: %q", 10),
 		},
 		{
@@ -202,8 +193,8 @@ func TestAptUpdates(t *testing.T) {
 					err:    errors.New("unexpected error"),
 				},
 			},
-			expectedResult: nil,
-			expectedError:  errors.New("unexpected error"),
+			expectedResults: nil,
+			expectedError:   errors.New("unexpected error"),
 		},
 		{
 			name: "apt-get upgrade fail",
@@ -224,8 +215,8 @@ func TestAptUpdates(t *testing.T) {
 					err:    errors.New("unexpected error"),
 				},
 			},
-			expectedResult: nil,
-			expectedError:  errors.New("unexpected error"),
+			expectedResults: nil,
+			expectedError:   errors.New("unexpected error"),
 		},
 		{
 			name: "Default upgrade type",
@@ -246,8 +237,8 @@ func TestAptUpdates(t *testing.T) {
 					err:    nil,
 				},
 			},
-			expectedResult: []*PkgInfo{{Name: "google-cloud-sdk", Arch: "x86_64", Version: "246.0.0-0"}},
-			expectedError:  nil,
+			expectedResults: []*PkgInfo{{Name: "google-cloud-sdk", Arch: NewArchitecture("amd64"), Version: "246.0.0-0"}},
+			expectedError:   nil,
 		},
 		{
 			name: "Dist upgrade type",
@@ -268,8 +259,8 @@ func TestAptUpdates(t *testing.T) {
 					err:    nil,
 				},
 			},
-			expectedResult: []*PkgInfo{{Name: "google-cloud-sdk", Arch: "x86_64", Version: "246.0.0-0"}},
-			expectedError:  nil,
+			expectedResults: []*PkgInfo{{Name: "google-cloud-sdk", Arch: NewArchitecture("amd64"), Version: "246.0.0-0"}},
+			expectedError:   nil,
 		},
 		{
 			name: "Full upgrade type",
@@ -290,8 +281,8 @@ func TestAptUpdates(t *testing.T) {
 					err:    nil,
 				},
 			},
-			expectedResult: []*PkgInfo{{Name: "google-cloud-sdk", Arch: "x86_64", Version: "246.0.0-0"}},
-			expectedError:  nil,
+			expectedResults: []*PkgInfo{{Name: "google-cloud-sdk", Arch: NewArchitecture("amd64"), Version: "246.0.0-0"}},
+			expectedError:   nil,
 		},
 		{
 			name: "Default upgrade type with showNew equals true",
@@ -314,9 +305,9 @@ func TestAptUpdates(t *testing.T) {
 					err:    nil,
 				},
 			},
-			expectedResult: []*PkgInfo{
-				{Name: "google-cloud-sdk", Arch: "x86_64", Version: "246.0.0-0"},
-				{Name: "firmware-linux-free", Arch: "all", Version: "3.4"},
+			expectedResults: []*PkgInfo{
+				{Name: "google-cloud-sdk", Arch: NewArchitecture("amd64"), Version: "246.0.0-0"},
+				{Name: "firmware-linux-free", Arch: NewArchitecture("all"), Version: "3.4"},
 			},
 			expectedError: nil,
 		},
@@ -341,8 +332,8 @@ func TestAptUpdates(t *testing.T) {
 					err:    nil,
 				},
 			},
-			expectedResult: []*PkgInfo{
-				{Name: "google-cloud-sdk", Arch: "x86_64", Version: "246.0.0-0"},
+			expectedResults: []*PkgInfo{
+				{Name: "google-cloud-sdk", Arch: NewArchitecture("amd64"), Version: "246.0.0-0"},
 			},
 			expectedError: nil,
 		},
@@ -372,8 +363,8 @@ func TestAptUpdates(t *testing.T) {
 					err:    nil,
 				},
 			},
-			expectedResult: []*PkgInfo{
-				{Name: "google-cloud-sdk", Arch: "x86_64", Version: "246.0.0-0"},
+			expectedResults: []*PkgInfo{
+				{Name: "google-cloud-sdk", Arch: NewArchitecture("amd64"), Version: "246.0.0-0"},
 			},
 			expectedError: nil,
 		},
@@ -394,8 +385,8 @@ func TestAptUpdates(t *testing.T) {
 				t.Errorf("AptUpdates: unexpected error, expect %q, got %q", formatError(tt.expectedError), formatError(err))
 			}
 
-			if !reflect.DeepEqual(pkgs, tt.expectedResult) {
-				t.Errorf("AptUpdates: unexpected result, expect %v, got %v", pkgs, tt.expectedResult)
+			if !reflect.DeepEqual(pkgs, tt.expectedResults) {
+				t.Errorf("AptUpdates: unexpected result, expect %v, got %v", pkgs, tt.expectedResults)
 			}
 		})
 	}
@@ -535,7 +526,7 @@ func TestInstalledDebPackages(t *testing.T) {
 		t.Errorf("InstalledDebPackages(): got unexpected error: %v", err)
 	}
 
-	want := []*PkgInfo{{Name: "git", Arch: "x86_64", Version: "1:2.25.1-1ubuntu3.12", Source: Source{Name: "git", Version: "1:2.25.1-1ubuntu3.12"}}}
+	want := []*PkgInfo{{Name: "git", Arch: NewArchitecture("amd64"), Version: "1:2.25.1-1ubuntu3.12", Source: Source{Name: "git", Version: "1:2.25.1-1ubuntu3.12"}}}
 	if !reflect.DeepEqual(result, want) {
 		t.Errorf("InstalledDebPackages() = %v, want %v", result, want)
 	}
@@ -560,8 +551,8 @@ func TestParseInstalledDebpackages(t *testing.T) {
 				"\n" +
 				`{"package":"man-db","architecture":"amd64","version":"2.9.1-1","status":"installed","source_name":"man-db","source_version":"2.9.1-1"}`),
 			want: []*PkgInfo{
-				{Name: "python3-gi", Arch: "x86_64", Version: "3.36.0-1", Source: Source{Name: "pygobject", Version: "3.36.0-1"}},
-				{Name: "man-db", Arch: "x86_64", Version: "2.9.1-1", Source: Source{Name: "man-db", Version: "2.9.1-1"}}},
+				{Name: "python3-gi", Arch: NewArchitecture("amd64"), Version: "3.36.0-1", Source: Source{Name: "pygobject", Version: "3.36.0-1"}},
+				{Name: "man-db", Arch: NewArchitecture("amd64"), Version: "2.9.1-1", Source: Source{Name: "man-db", Version: "2.9.1-1"}}},
 		},
 		{
 			name:  "No lines formatted as a package info",
@@ -577,7 +568,14 @@ func TestParseInstalledDebpackages(t *testing.T) {
 			name: "Skip wrongly formatted lines",
 			input: []byte("something we dont understand\n" +
 				`{"package":"python3-gi","architecture":"amd64","version":"3.36.0-1","status":"installed","source_name":"pygobject","source_version":"3.36.0-1"}`),
-			want: []*PkgInfo{{Name: "python3-gi", Arch: "x86_64", Version: "3.36.0-1", Source: Source{Name: "pygobject", Version: "3.36.0-1"}}},
+			want: []*PkgInfo{{Name: "python3-gi", Arch: NewArchitecture("amd64"), Version: "3.36.0-1", Source: Source{Name: "pygobject", Version: "3.36.0-1"}}},
+		},
+		{
+			name: "Skip entries that have status other than 'installed'",
+			input: []byte("" +
+				`{"package":"python3-gi","architecture":"amd64","version":"3.36.0-1","status":"installed","source_name":"pygobject","source_version":"3.36.0-1"}` + "\n" +
+				`{"package":"man-db","architecture":"amd64","version":"2.9.1-1","status":"config-files","source_name":"man-db","source_version":"2.9.1-1"}`),
+			want: []*PkgInfo{{Name: "python3-gi", Arch: NewArchitecture("amd64"), Version: "3.36.0-1", Source: Source{Name: "pygobject", Version: "3.36.0-1"}}},
 		},
 	}
 
@@ -609,8 +607,8 @@ Conf firmware-linux-free (3.4 Debian:9.9/stable [all])
 			input:   []byte(normalCase),
 			showNew: false,
 			want: []*PkgInfo{
-				{Name: "libldap-common", Arch: "all", Version: "2.4.45+dfsg-1ubuntu1.3"},
-				{Name: "google-cloud-sdk", Arch: "x86_64", Version: "246.0.0-0"},
+				{Name: "libldap-common", Arch: NewArchitecture("all"), Version: "2.4.45+dfsg-1ubuntu1.3"},
+				{Name: "google-cloud-sdk", Arch: NewArchitecture("amd64"), Version: "246.0.0-0"},
 			},
 		},
 		{
@@ -618,9 +616,9 @@ Conf firmware-linux-free (3.4 Debian:9.9/stable [all])
 			input:   []byte(normalCase),
 			showNew: true,
 			want: []*PkgInfo{
-				{Name: "libldap-common", Arch: "all", Version: "2.4.45+dfsg-1ubuntu1.3"},
-				{Name: "google-cloud-sdk", Arch: "x86_64", Version: "246.0.0-0"},
-				{Name: "firmware-linux-free", Arch: "all", Version: "3.4"},
+				{Name: "libldap-common", Arch: NewArchitecture("all"), Version: "2.4.45+dfsg-1ubuntu1.3"},
+				{Name: "google-cloud-sdk", Arch: NewArchitecture("amd64"), Version: "246.0.0-0"},
+				{Name: "firmware-linux-free", Arch: NewArchitecture("all"), Version: "3.4"},
 			},
 		},
 		{
@@ -640,7 +638,7 @@ Conf firmware-linux-free (3.4 Debian:9.9/stable [all])
 			input:   []byte("Inst something [we dont understand\n Inst google-cloud-sdk [245.0.0-0] (246.0.0-0 cloud-sdk-stretch:cloud-sdk-stretch [amd64])"),
 			showNew: false,
 			want: []*PkgInfo{
-				{Name: "google-cloud-sdk", Arch: "x86_64", Version: "246.0.0-0"},
+				{Name: "google-cloud-sdk", Arch: NewArchitecture("amd64"), Version: "246.0.0-0"},
 			},
 		},
 	}
@@ -687,7 +685,7 @@ func TestDebPkgInfo(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	want := &PkgInfo{Name: "google-guest-agent", Arch: "x86_64", Version: "1:1dummy-g1"}
+	want := &PkgInfo{Name: "google-guest-agent", Arch: NewArchitecture("amd64"), Version: "1:1dummy-g1"}
 	if !reflect.DeepEqual(ret, want) {
 		t.Errorf("DebPkgInfo() = %+v, want %+v", ret, want)
 	}
@@ -768,37 +766,4 @@ func TestDpkgInstall(t *testing.T) {
 	if err := DpkgInstall(testCtx, path); err != nil {
 		t.Errorf("DpkgInstall: got unexpected error %q", err)
 	}
-}
-
-func setExpectations(mockCommandRunner *utilmocks.MockCommandRunner, expectedCommandsChain []expectedCommand) {
-	if len(expectedCommandsChain) == 0 {
-		return
-	}
-
-	var prev *gomock.Call
-	for _, expectedCmd := range expectedCommandsChain {
-		cmd := expectedCmd.cmd
-		if len(expectedCmd.envs) > 0 {
-			cmd.Env = append(os.Environ(), expectedCmd.envs...)
-		}
-
-		if prev == nil {
-			prev = mockCommandRunner.EXPECT().
-				Run(testCtx, utilmocks.EqCmd(cmd)).
-				Return(expectedCmd.stdout, expectedCmd.stderr, expectedCmd.err).Times(1)
-		} else {
-			prev = mockCommandRunner.EXPECT().
-				Run(testCtx, utilmocks.EqCmd(cmd)).
-				After(prev).
-				Return(expectedCmd.stdout, expectedCmd.stderr, expectedCmd.err).Times(1)
-		}
-	}
-}
-
-func formatError(err error) string {
-	if err == nil {
-		return "<nil>"
-	}
-
-	return err.Error()
 }
