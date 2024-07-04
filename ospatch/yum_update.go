@@ -78,12 +78,13 @@ func YumDryRun(dryrun bool) YumUpdateOption {
 	}
 }
 
-func fullPackageName(pkg *packages.PkgInfo) string {
-	nameWithArch := pkg.Name
-	if len(pkg.Arch.RawArch) > 0 {
-		nameWithArch = nameWithArch + "." + pkg.Arch.RawArch
+// fullPackageName returns the package name with architecture if present.
+func fullPackageName(pkgInfo *packages.PkgInfo) string {
+	pkgName := pkgInfo.Name
+	if len(pkgInfo.RawArch) > 0 {
+		pkgName = pkgName + "." + pkgInfo.RawArch
 	}
-	return nameWithArch
+	return pkgName
 }
 
 // RunYumUpdate runs yum update.
