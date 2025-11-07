@@ -1,15 +1,16 @@
-/*
-Copyright 2017 Google Inc. All Rights Reserved.
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-    http://www.apache.org/licenses/LICENSE-2.0
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+//  Copyright 2017 Google Inc. All Rights Reserved.
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
 
 package packages
 
@@ -19,13 +20,27 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/GoogleCloudPlatform/osconfig/agentconfig"
 	"github.com/GoogleCloudPlatform/osconfig/clog"
+	"github.com/GoogleCloudPlatform/osconfig/osinfo"
 )
 
 // GetPackageUpdates gets all available package updates from any known
 // installed package manager.
-func GetPackageUpdates(ctx context.Context) (*Packages, error) {
+func GetPackageUpdates(ctx context.Context) (Packages, error) {
+	pkgs, errs := getPackageUpdates(ctx)
+
+	var err error
+	if len(errs) != 0 {
+		err = errors.New(strings.Join(errs, "\n"))
+	}
+
+	return pkgs, err
+}
+
+func getPackageUpdates(ctx context.Context) (Packages, []string) {
 	pkgs := Packages{}
+
 	var errs []string
 	if AptExists {
 		apt, err := AptUpdates(ctx, AptGetUpgradeType(AptGetFullUpgrade), AptGetUpgradeShowNew(false))
@@ -84,17 +99,24 @@ func GetPackageUpdates(ctx context.Context) (*Packages, error) {
 		}
 	}
 
-	var err error
-	if len(errs) != 0 {
-		err = errors.New(strings.Join(errs, "\n"))
-	}
-	return &pkgs, err
+	return pkgs, errs
 }
 
 // GetInstalledPackages gets all installed packages from any known installed
 // package manager.
-func GetInstalledPackages(ctx context.Context) (*Packages, error) {
-	pkgs := &Packages{}
+func GetInstalledPackages(ctx context.Context) (Packages, error) {
+	pkgs, errs := getInstalledPackages(ctx)
+	var err error
+	if len(errs) != 0 {
+		err = errors.New(strings.Join(errs, "\n"))
+	}
+
+	return pkgs, err
+}
+
+func getInstalledPackages(ctx context.Context) (Packages, []string) {
+	pkgs := Packages{}
+
 	var errs []string
 	if RPMQueryExists {
 		rpm, err := InstalledRPMPackages(ctx)
@@ -155,9 +177,21 @@ func GetInstalledPackages(ctx context.Context) (*Packages, error) {
 		}
 	}
 
-	var err error
-	if len(errs) != 0 {
-		err = errors.New(strings.Join(errs, "\n"))
+	return pkgs, errs
+}
+
+// NewInstalledPackagesProvider makes provider that uses osv-scalibr as its implementation if enabled by config, otherwise falls back to default legacy implementation.
+func NewInstalledPackagesProvider(osinfoProvider osinfo.Provider) InstalledPackagesProvider {
+	if agentconfig.ScalibrLinuxEnabled() {
+		return scalibrInstalledPackagesProvider{
+			extractors: []string{
+				"os/cos",
+				"os/dpkg",
+				"os/rpm",
+			},
+			osinfoProvider: osinfoProvider,
+		}
 	}
-	return pkgs, err
+
+	return defaultInstalledPackagesProvider{}
 }

@@ -147,7 +147,7 @@ func parseZypperUpdates(data []byte) []*PkgInfo {
 		name := string(bytes.TrimSpace(pkg[2]))
 		arch := string(bytes.TrimSpace(pkg[5]))
 		ver := string(bytes.TrimSpace(pkg[4]))
-		pkgs = append(pkgs, &PkgInfo{Name: name, Arch: osinfo.Architecture(arch), Version: ver})
+		pkgs = append(pkgs, &PkgInfo{Name: name, Arch: osinfo.NormalizeArchitecture(arch), Version: ver})
 	}
 	return pkgs
 }
@@ -377,7 +377,7 @@ func parseZypperPatchInfo(out []byte) (map[string][]string, error) {
 			//zypper-needs-restarting < 1.14.64-150400.3.32.1
 			parts := strings.Split(string(lines[ctr]), "<")
 			if len(parts) != 2 {
-				return nil, fmt.Errorf("invalid package info, can't parse line: " + string(lines[ctr]))
+				return nil, fmt.Errorf("invalid package info, can't parse line: %v", string(lines[ctr]))
 			}
 
 			nameArch := parts[0]
@@ -386,7 +386,7 @@ func parseZypperPatchInfo(out []byte) (map[string][]string, error) {
 				colonIdx := strings.Index(nameArch, ":")
 				pkgName = strings.Trim(nameArch[colonIdx+1:], " ")
 				if len(pkgName) == 0 {
-					return nil, fmt.Errorf("invalid package info, can't parse line: " + string(lines[ctr]))
+					return nil, fmt.Errorf("invalid package info, can't parse line: %v", string(lines[ctr]))
 				}
 			} else {
 				// Get the last index to handle the case if pkg has float version

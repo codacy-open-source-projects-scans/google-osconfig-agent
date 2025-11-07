@@ -55,12 +55,39 @@ var (
 	// MSIExists indicates whether MSIs can be installed.
 	MSIExists bool
 
-	noarch = osinfo.Architecture("noarch")
+	noarch = osinfo.NormalizeArchitecture("noarch")
 
 	runner = util.CommandRunner(&util.DefaultRunner{})
 
 	ptyrunner = util.CommandRunner(&ptyRunner{})
 )
+
+// PackageUpdatesProvider define contract to extract available updates from the VM.
+type PackageUpdatesProvider interface {
+	GetPackageUpdates(context.Context) (Packages, error)
+}
+
+// InstalledPackagesProvider define contract to extract installed packages from the VM.
+type InstalledPackagesProvider interface {
+	GetInstalledPackages(context.Context) (Packages, error)
+}
+
+type defaultUpdatesProvider struct{}
+
+// NewPackageUpdatesProvider return fully initialize provider.
+func NewPackageUpdatesProvider() PackageUpdatesProvider {
+	return defaultUpdatesProvider{}
+}
+
+func (p defaultUpdatesProvider) GetPackageUpdates(ctx context.Context) (Packages, error) {
+	return GetPackageUpdates(ctx)
+}
+
+type defaultInstalledPackagesProvider struct{}
+
+func (p defaultInstalledPackagesProvider) GetInstalledPackages(ctx context.Context) (Packages, error) {
+	return GetInstalledPackages(ctx)
+}
 
 // Packages is a selection of packages based on their manager.
 type Packages struct {
@@ -174,7 +201,7 @@ type packageMetadata struct {
 func pkgInfoFromPackageMetadata(pm packageMetadata) *PkgInfo {
 	return &PkgInfo{
 		Name:    pm.Package,
-		Arch:    osinfo.Architecture(pm.Architecture),
+		Arch:    osinfo.NormalizeArchitecture(pm.Architecture),
 		Version: pm.Version,
 		Source: Source{
 			Name:    pm.SourceName,

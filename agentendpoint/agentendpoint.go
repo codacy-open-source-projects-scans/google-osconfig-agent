@@ -16,10 +16,7 @@
 package agentendpoint
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +27,7 @@ import (
 	agentendpoint "cloud.google.com/go/osconfig/agentendpoint/apiv1"
 	"github.com/GoogleCloudPlatform/osconfig/agentconfig"
 	"github.com/GoogleCloudPlatform/osconfig/clog"
+	"github.com/GoogleCloudPlatform/osconfig/inventory"
 	"github.com/GoogleCloudPlatform/osconfig/osinfo"
 	"github.com/GoogleCloudPlatform/osconfig/retryutil"
 	"github.com/GoogleCloudPlatform/osconfig/tasker"
@@ -39,7 +37,6 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"cloud.google.com/go/osconfig/agentendpoint/apiv1/agentendpointpb"
 )
@@ -62,6 +59,8 @@ type Client struct {
 	noti   chan struct{}
 	closed bool
 	mx     sync.Mutex
+
+	inventoryProvider inventory.Provider
 }
 
 // NewClient a new agentendpoint Client.
@@ -87,7 +86,11 @@ func NewClient(ctx context.Context) (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{raw: c, noti: make(chan struct{}, 1)}, nil
+	return &Client{
+		raw:               c,
+		noti:              make(chan struct{}, 1),
+		inventoryProvider: inventory.NewProvider(),
+	}, nil
 }
 
 // Close cancels WaitForTaskNotification and closes the underlying ClientConn.
@@ -113,7 +116,7 @@ func (c *Client) RegisterAgent(ctx context.Context) error {
 		return err
 	}
 
-	oi := &osinfo.OSInfo{}
+	oi := osinfo.OSInfo{}
 	if agentconfig.OSInventoryEnabled() {
 		oi, err = osinfo.Get()
 		if err != nil {
@@ -151,14 +154,11 @@ func (c *Client) reportInventory(ctx context.Context, inventory *agentendpointpb
 		return nil, err
 	}
 
-	hash := sha256.New()
-	b, err := proto.Marshal(inventory)
+	checksum, err := computeStableFingerprint(ctx, inventory)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to compute hash, err: %w", err)
 	}
-	io.Copy(hash, bytes.NewReader(b))
 
-	checksum := hex.EncodeToString(hash.Sum(nil))
 	req := &agentendpointpb.ReportInventoryRequest{InventoryChecksum: checksum}
 	if reportFull {
 		req = &agentendpointpb.ReportInventoryRequest{InventoryChecksum: checksum, Inventory: inventory}
@@ -381,7 +381,7 @@ func (c *Client) WaitForTaskNotification(ctx context.Context) {
 
 	clog.Debugf(ctx, "Checking local state file for saved task.")
 	if err := c.loadTaskFromState(ctx); err != nil {
-		clog.Errorf(ctx, err.Error())
+		clog.Errorf(ctx, "%v", err.Error())
 	}
 
 	clog.Debugf(ctx, "Setting up ReceiveTaskNotification stream watcher.")

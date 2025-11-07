@@ -134,6 +134,9 @@ func InstallOSConfigDeb(image string) string {
 sleep 10
 systemctl stop google-osconfig-agent
 
+# disable the backports repo for debian-11
+sed -i 's/^.*debian bullseye-backports main.*$//g' /etc/apt/sources.list
+
 # install gnupg2 if not exist
 apt-get update
 apt-get install -y gnupg2
@@ -355,12 +358,15 @@ var HeadSUSEImages = func() map[string]string {
 	// TODO: enable SUSE tests to use testing pkgs after Artifact Registry supports zypper installation from private repos
 	if config.AgentRepo() != "testing" {
 		imgsMap = map[string]string{
-			"suse-cloud/sles-12-sp5": "projects/suse-cloud/global/images/family/sles-12",
-			"suse-cloud/sles-15-sp5": "projects/suse-cloud/global/images/family/sles-15",
+			"suse-cloud/sles-12-latest-sp": "projects/suse-cloud/global/images/family/sles-12",
+			"suse-cloud/sles-15-latest-sp": "projects/suse-cloud/global/images/family/sles-15",
+			"suse-cloud/sles-15-sp5":       "projects/suse-cloud/global/images/family/sles-15-sp5",
+			"suse-cloud/sles-15-sp6":       "projects/suse-cloud/global/images/family/sles-15-sp6",
 
 			"suse-sap-cloud/sles-12-sp5-sap": "projects/suse-sap-cloud/global/images/family/sles-12-sp5-sap",
 			"suse-sap-cloud/sles-15-sp5-sap": "projects/suse-sap-cloud/global/images/family/sles-15-sp5-sap",
 			"suse-sap-cloud/sles-15-sp6-sap": "projects/suse-sap-cloud/global/images/family/sles-15-sp6-sap",
+			"suse-sap-cloud/sles-15-sp7-sap": "projects/suse-sap-cloud/global/images/family/sles-15-sp7-sap",
 
 			"suse-sap-cloud/sles-15-sp5-hardened-sap": "projects/suse-sap-cloud/global/images/family/sles-sap-15-sp5-hardened",
 
@@ -376,10 +382,7 @@ var OldSUSEImages = func() map[string]string {
 
 	// TODO: enable SUSE tests to use testing pkgs after Artifact Registry supports zypper installation from private repos
 	if config.AgentRepo() != "testing" {
-		imgsMap = map[string]string{
-			"old/sles-15-sp3-sap": "projects/suse-sap-cloud/global/images/sles-15-sp3-sap-v20240808-x86-64",
-			"old/sles-15-sp4-sap": "projects/suse-sap-cloud/global/images/sles-15-sp4-sap-v20240208-x86-64",
-		}
+		imgsMap = map[string]string{}
 	}
 	return imgsMap
 }()
@@ -388,9 +391,9 @@ var OldSUSEImages = func() map[string]string {
 var HeadEL8Images = map[string]string{
 	"rhel-cloud/rhel-8": "projects/rhel-cloud/global/images/family/rhel-8",
 
-	"rhel-sap-cloud/rhel-8-4-sap": "projects/rhel-sap-cloud/global/images/family/rhel-8-4-sap-ha",
-	"rhel-sap-cloud/rhel-8-6-sap": "projects/rhel-sap-cloud/global/images/family/rhel-8-6-sap-ha",
-	"rhel-sap-cloud/rhel-8-8-sap": "projects/rhel-sap-cloud/global/images/family/rhel-8-8-sap-ha",
+	"rhel-sap-cloud/rhel-8-6-sap":  "projects/rhel-sap-cloud/global/images/family/rhel-8-6-sap-ha",
+	"rhel-sap-cloud/rhel-8-8-sap":  "projects/rhel-sap-cloud/global/images/family/rhel-8-8-sap-ha",
+	"rhel-sap-cloud/rhel-8-10-sap": "projects/rhel-sap-cloud/global/images/family/rhel-8-10-sap-ha",
 
 	"rocky-linux-cloud/rocky-linux-8":               "projects/rocky-linux-cloud/global/images/family/rocky-linux-8",
 	"rocky-linux-cloud/rocky-linux-8-optimized-gcp": "projects/rocky-linux-cloud/global/images/family/rocky-linux-8-optimized-gcp",
