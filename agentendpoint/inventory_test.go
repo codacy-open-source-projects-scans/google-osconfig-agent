@@ -32,6 +32,7 @@ import (
 	"github.com/GoogleCloudPlatform/osconfig/inventory"
 	"github.com/GoogleCloudPlatform/osconfig/packages"
 	utilmocks "github.com/GoogleCloudPlatform/osconfig/util/mocks"
+	"github.com/GoogleCloudPlatform/osconfig/util/utiltest"
 	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
 	"github.com/googleapis/gax-go/v2"
@@ -137,8 +138,9 @@ func generateInventoryState() *inventory.InstanceInventory {
 				RevisionNumber:           1,
 				LastDeploymentChangeTime: time.Date(2020, time.November, 10, 23, 0, 0, 0, time.UTC),
 				Purl:                     "pkg:generic/ShortName/WUAInstalled@UpdateID"}},
-			QFE: []*packages.QFEPackage{{Caption: "QFEInstalled", Description: "Description", HotFixID: "HotFixID", InstalledOn: "9/1/2020", Purl: "pkg:generic/ShortName/QFEInstalled@HotFixID"}},
-			COS: []*packages.PkgInfo{{Name: "CosInstalledPkg", Arch: "Arch", Version: "Version", Type: "cos", Purl: "pkg:cos/ShortName/CosInstalledPkg@Version?arch=Arch"}},
+			QFE:  []*packages.QFEPackage{{Caption: "QFEInstalled", Description: "Description", HotFixID: "HotFixID", InstalledOn: "9/1/2020", Purl: "pkg:generic/ShortName/QFEInstalled@HotFixID"}},
+			COS:  []*packages.PkgInfo{{Name: "CosInstalledPkg", Arch: "Arch", Version: "Version", Type: "cos", Purl: "pkg:cos/ShortName/CosInstalledPkg@Version?arch=Arch"}},
+			Snap: []*packages.PkgInfo{{Name: "SnapInstalledPkg", Arch: "Arch", Version: "Version", Type: "snap", Purl: "pkg:snap/ShortName/SnapInstalledPkg@Version?arch=Arch"}},
 		},
 		PackageUpdates: &packages.Packages{
 			Yum:           []*packages.PkgInfo{{Name: "YumPkgUpdate", Arch: "Arch", Version: "Version", Type: "rpm", Purl: "pkg:rpm/ShortName/YumPkgUpdate@Version?arch=Arch"}},
@@ -147,6 +149,7 @@ func generateInventoryState() *inventory.InstanceInventory {
 			ZypperPatches: []*packages.ZypperPatch{{Name: "ZypperPatchUpdate", Category: "Category", Severity: "Severity", Summary: "Summary", Purl: "pkg:generic/ShortName/ZypperPatchUpdate"}},
 			Gem:           []*packages.PkgInfo{{Name: "GemPkgUpdate", Arch: "Arch", Version: "Version", Purl: "pkg:gem/GemPkgUpdate@Version"}},
 			Pip:           []*packages.PkgInfo{{Name: "PipPkgUpdate", Arch: "Arch", Version: "Version", Purl: "pkg:pypi/PipPkgUpdate@Version"}},
+			Snap:          []*packages.PkgInfo{{Name: "SnapPkgUpdate", Arch: "Arch", Version: "Version", Type: "snap", Purl: "pkg:snap/ShortName/SnapPkgUpdate@Version?arch=Arch"}},
 			GooGet:        []*packages.PkgInfo{{Name: "GooGetPkgUpdate", Arch: "Arch", Version: "Version", Type: "googet", Purl: "pkg:googet/ShortName/GooGetPkgUpdate@Version"}},
 			WUA: []*packages.WUAPackage{{
 				Title:       "WUAUpdate",
@@ -209,6 +212,8 @@ func generateVMInventory() *agentendpointpb.VmInventory {
 				}}},
 			{Name: "CosInstalledPkg", Type: "cos", Version: "Version", Purl: "pkg:cos/ShortName/CosInstalledPkg@Version?arch=Arch",
 				Location: []string{}, Metadata: &structpb.Struct{Fields: map[string]*structpb.Value{}}},
+			{Name: "SnapInstalledPkg", Type: "snap", Version: "Version", Purl: "pkg:snap/ShortName/SnapInstalledPkg@Version?arch=Arch",
+				Location: []string{}, Metadata: &structpb.Struct{Fields: map[string]*structpb.Value{}}},
 			{Name: "GooGetInstalledPkg", Type: "googet", Version: "Version", Purl: "pkg:googet/ShortName/GooGetInstalledPkg@Version", Metadata: &structpb.Struct{}},
 			{Name: "WUAInstalled", Type: "wuaPackage", Version: "UpdateID", Purl: "pkg:generic/ShortName/WUAInstalled@UpdateID", Location: []string{}, Metadata: &structpb.Struct{Fields: map[string]*structpb.Value{
 				"Description": structpb.NewStringValue("Description"),
@@ -220,13 +225,13 @@ func generateVMInventory() *agentendpointpb.VmInventory {
 				"KbArticleId":              structpb.NewListValue(&structpb.ListValue{Values: []*structpb.Value{structpb.NewStringValue("KB1"), structpb.NewStringValue("KB2"), structpb.NewStringValue("KB3"), structpb.NewStringValue("KB4")}}),
 				"MoreInfoUrls":             structpb.NewListValue(&structpb.ListValue{Values: []*structpb.Value{structpb.NewStringValue("MoreInfoURL1"), structpb.NewStringValue("MoreInfoURL2"), structpb.NewStringValue("MoreInfoURL3"), structpb.NewStringValue("MoreInfoURL4")}}),
 				"RevisionNumber":           structpb.NewNumberValue(1),
-				"LastDeploymentChangeTime": structpb.NewStringValue(time.Date(2020, time.November, 10, 23, 0, 0, 0, time.UTC).String()),
+				"LastDeploymentChangeTime": structpb.NewStringValue("2020-11-10 23:00:00 +0000 GMT"),
 				"SupportUrl":               structpb.NewStringValue("SupportURL"),
 			}}},
 			{Name: "QFEInstalled", Type: "qfePackage", Version: "HotFixID", Purl: "pkg:generic/ShortName/QFEInstalled@HotFixID",
 				Metadata: &structpb.Struct{Fields: map[string]*structpb.Value{
 					"Description": structpb.NewStringValue("Description"),
-					"InstalledOn": structpb.NewStringValue("9/1/2020"),
+					"InstalledOn": structpb.NewStringValue("2020-09-01 00:00:00 +0000 GMT"),
 				}}},
 		},
 		AvailablePackages: []*agentendpointpb.VmInventory_InventoryItem{
@@ -249,6 +254,8 @@ func generateVMInventory() *agentendpointpb.VmInventory {
 					"Severity": structpb.NewStringValue("Severity"),
 					"Summary":  structpb.NewStringValue("Summary"),
 				}}},
+			{Name: "SnapPkgUpdate", Type: "snap", Version: "Version", Purl: "pkg:snap/ShortName/SnapPkgUpdate@Version?arch=Arch",
+				Location: []string{}, Metadata: &structpb.Struct{Fields: map[string]*structpb.Value{}}},
 			{Name: "GooGetPkgUpdate", Type: "googet", Version: "Version", Purl: "pkg:googet/ShortName/GooGetPkgUpdate@Version",
 				Location: []string{}, Metadata: &structpb.Struct{Fields: map[string]*structpb.Value{}}},
 			{Name: "WUAUpdate", Type: "wuaPackage", Version: "UpdateID", Purl: "pkg:generic/ShortName/WUAUpdate@UpdateID",
@@ -262,7 +269,7 @@ func generateVMInventory() *agentendpointpb.VmInventory {
 					"KbArticleId":              structpb.NewListValue(&structpb.ListValue{Values: []*structpb.Value{structpb.NewStringValue("KB1"), structpb.NewStringValue("KB2"), structpb.NewStringValue("KB3"), structpb.NewStringValue("KB4")}}),
 					"MoreInfoUrls":             structpb.NewListValue(&structpb.ListValue{Values: []*structpb.Value{structpb.NewStringValue("MoreInfoURL1"), structpb.NewStringValue("MoreInfoURL2"), structpb.NewStringValue("MoreInfoURL3"), structpb.NewStringValue("MoreInfoURL4")}}),
 					"RevisionNumber":           structpb.NewNumberValue(1),
-					"LastDeploymentChangeTime": structpb.NewStringValue("0001-01-01 00:00:00 +0000 UTC"),
+					"LastDeploymentChangeTime": structpb.NewStringValue("0001-01-01 00:00:00 +0000 GMT"),
 					"SupportUrl":               structpb.NewStringValue("SupportURL"),
 				}}},
 		},
@@ -830,5 +837,83 @@ func Benchmark_computeStableFingerprint(b *testing.B) {
 		if err != nil {
 			b.Fatalf("unable to generate fingerprint, err - %s", err)
 		}
+	}
+}
+
+func Test_reportVmInventory_parseWindowsApplicationDate(t *testing.T) {
+	apps := []*packages.WindowsApplication{{
+		DisplayName:    "TestApp",
+		DisplayVersion: "1.0",
+		InstallDate:    time.Date(2026, 4, 28, 14, 30, 0, 0, time.UTC),
+		Publisher:      "TestPublisher",
+		HelpLink:       "TestLink",
+		Purl:           "pkg:generic/TestApp@1.0",
+	}}
+
+	got := windowsApplicationToInventoryItem(apps)
+	if len(got) != 1 {
+		t.Fatalf("Expected 1 item, got %d", len(got))
+	}
+
+	fields := got[0].Metadata.Fields
+
+	utiltest.AssertEquals(t, fields["Publisher"].GetStringValue(), "TestPublisher")
+	utiltest.AssertEquals(t, fields["InstallDate"].GetStringValue(), "2026-04-28 14:30:00 +0000 GMT")
+	utiltest.AssertEquals(t, fields["HelpLink"].GetStringValue(), "TestLink")
+}
+
+func Test_reportVmInventory_parseQFEDate(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    time.Time
+		wantErr error
+	}{
+		{
+			name:    "Format M/D/YYYY",
+			input:   "9/1/2020",
+			want:    time.Date(2020, time.September, 1, 0, 0, 0, 0, time.UTC),
+			wantErr: nil,
+		},
+		{
+			name:    "Format YYYYMMDD",
+			input:   "20200901",
+			want:    time.Date(2020, time.September, 1, 0, 0, 0, 0, time.UTC),
+			wantErr: nil,
+		},
+		{
+			name:    "Format YYYY-MM-DD",
+			input:   "2020-09-01",
+			want:    time.Date(2020, time.September, 1, 0, 0, 0, 0, time.UTC),
+			wantErr: nil,
+		},
+		{
+			name:    "Format DD-Mon-YYYY",
+			input:   "01-Sep-2020",
+			want:    time.Date(2020, time.September, 1, 0, 0, 0, 0, time.UTC),
+			wantErr: nil,
+		},
+		{
+			name:    "Empty date",
+			input:   "",
+			want:    time.Time{},
+			wantErr: fmt.Errorf("unable to parse date \"\" with any known layout"),
+		},
+		{
+			name:    "Invalid Format",
+			input:   "bad-date",
+			want:    time.Time{},
+			wantErr: fmt.Errorf("unable to parse date \"bad-date\" with any known layout"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseQFEDate(ctx, tt.input)
+			utiltest.AssertErrorMatch(t, err, tt.wantErr)
+			utiltest.AssertEquals(t, got, tt.want)
+		})
 	}
 }
